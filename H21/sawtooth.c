@@ -1,36 +1,36 @@
 #include <avr/io.h>
+#include <stdint.h>
+#include <avr/interrupt.h>
 
 #define f_CLK 4194304
-#define TC1_CLK 524288
-#define one_sec_period 524288
-/*
-I need to:
-    1. Set up the T/C1 to be able to output a PWM signal.
-    2. Set up the logic that makes the output the sawtooth pattern shown in the picture.
-    3. Set up the interrupt logic so that this gets turned on and runs in the background 
-        without being affected by the main instruction flow
-*/
 
-void DAC_init(void){
-    /*
-    TCNT1
-    A match from TCNT1 and OCR1B will set the OCF1B Flag and if OCIE1B = 1 then an output 
-    compare interrupt will be generated.
+static volatile uint8_t overflow_counter = 0;
+static volatile uint8_t dutycycle = 0;
 
-    What if i do period = 1000ms, and the vlue that is outputted is the counter TCNT1B normalized around 0 and 255?
-    In order to get a period of 1s we need to reset the value after 524288 ticks. We therefore need to use a 16-bit timer,
-    and a 16-bit compare value of 524288
-    */
+void sawtooth_generation(void){
 
-    // TCCR1B |= (00000010) // Already defined by the task description.
-    // TODO: Activate clock signal on TCN1
+    TCCR1B |= (1 << CS11); // Already defined by the task description.
 
-    OCR1BH = (one_sec_period >> 8); // Sets the value for the compare register.
-    OCR1BL = (one_sec_period);
-    TCCR1B |= (1 << WGM12); // Turns on reset for TCNT1B on compare.
+    DDRE |= (1 << DDE2); // Configure the OC1B pin PE2 as output
+    OCR1B = 0; // Start the sawtooth signal at 0V.
     
+    TCCR1A |= (1 << WGM10); // Fast PWM mode 8-bit
+    TCCR1B |= (1 << WGM12);
+    
+    TCCR1A |= (1 << COM1B1); // Start HIGH and go LOW on Compare
 
-    DDRB |= (1 << OC1B); // Set the pin as output
+
+    sei(); // Global interrupts enable
+    TIMSK |= (1 << TOIE1); // Overflow interrupt enable
+}
 
 
+ISR(TIMER1_OVF_vect){
+    overflow_counter++;
+
+    if (overflow_counter >= 8){ // Every 8 overflow we update the dutycycle
+        overflow_counter = 0;
+        dutycycle++;
+        OCR1B = dutycycle;
+    }    
 }
